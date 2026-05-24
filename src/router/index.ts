@@ -1,11 +1,11 @@
-import { createRouter, createWebHistory } from 'vue-router';
+import { createRouter, createWebHistory, createWebHashHistory } from 'vue-router';
 import HomeView from '@/views/HomeView.vue';
 import MasterView from '@/views/MasterView.vue';
 import PlayerFlowView from '@/views/PlayerFlowView.vue';
 import { useAuthStore } from '@/stores/auth';
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: import.meta.env.PROD ? createWebHashHistory() : createWebHistory(),
   routes: [
     {
       path: '/',
