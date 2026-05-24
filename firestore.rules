@@ -107,11 +107,19 @@ service cloud.firestore {
               ])
             ) ||
             
-            // Action 3: Attribute Distribution
+            // Action 3: Attribute Distribution and modifications
             (
               (resource.data.status == 'aprovado' || resource.data.status == 'distribuicao_liberada') && 
               request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-                'attributes', 'status', 'updatedAt'
+                'attributes', 'status', 'updatedAt', 'raceId', 'rolls'
+              ])
+            ) ||
+
+            // Action 4: Consecrated/Finalized Updates (remodel race or rolls)
+            (
+              resource.data.status == 'ficha_finalizada' &&
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'attributes', 'raceId', 'rolls', 'updatedAt'
               ])
             )
           )
