@@ -279,20 +279,27 @@ const removeValue = (stat: StatType) => {
   delete distribution.value[stat];
 };
 
+const getRacialBonusForStat = (stat: StatType) => {
+  if (!selectedRace.value) return 0;
+  const fixed = selectedRace.value.bonuses?.[stat] || 0;
+  let choice = 0;
+  if (selectedRace.value.choiceCount) {
+    const idx = choiceSelections.value.indexOf(stat);
+    if (idx > -1) {
+      choice = selectedRace.value.choiceBonuses && selectedRace.value.choiceBonuses[idx] !== undefined
+        ? selectedRace.value.choiceBonuses[idx]
+        : (selectedRace.value.choiceBonus || 1);
+    }
+  }
+  return fixed + choice;
+};
+
 const finalAttributes = computed(() => {
   const result: any = {};
-  const raceBonuses = { ...(selectedRace.value?.bonuses || {}) };
-  
-  // Apply choice bonuses
-  if (selectedRace.value?.choiceCount) {
-    choiceSelections.value.forEach(stat => {
-      raceBonuses[stat] = (raceBonuses[stat] || 0) + (selectedRace.value?.choiceBonus || 1);
-    });
-  }
   
   stats.forEach(s => {
     const base = distribution.value[s] || 0;
-    const bonus = raceBonuses[s] || 0;
+    const bonus = getRacialBonusForStat(s);
     result[s] = base + bonus;
   });
   
@@ -728,7 +735,9 @@ onUnmounted(() => {
               <div class="flex items-center justify-between">
                 <div>
                   <h4 class="text-sm font-rpg font-black text-arcane-600 dark:text-arcane-400 uppercase tracking-tighter italic">DÁDIVAS DA ANCESTRALIDADE</h4>
-                  <p class="text-[9px] font-bold text-neutral-400 uppercase tracking-widest">Escolha {{ selectedRace.choiceCount }} atributos para receber +{{ selectedRace.choiceBonus || 1 }}</p>
+                  <p class="text-[9px] font-bold text-neutral-400 uppercase tracking-widest">
+                    Escolha {{ selectedRace.choiceCount }} atributos para receber os respectivos bônus ({{ selectedRace.choiceBonuses && selectedRace.choiceBonuses.length > 0 ? selectedRace.choiceBonuses.map(b => '+' + b).join(', ') : '+' + (selectedRace.choiceBonus || 1) }})
+                  </p>
                 </div>
                 <div class="px-5 py-2 bg-white dark:bg-neutral-900 rounded-2xl border border-arcane-500/20 text-[10px] font-black text-arcane-500 shadow-sm">
                   {{ choiceSelections.length }} / {{ selectedRace.choiceCount }}
@@ -781,12 +790,12 @@ onUnmounted(() => {
                       
                       <!-- Racial Bonus (Visible even before assignment) -->
                       <div 
-                        v-if="(selectedRace?.bonuses?.[stat] || 0) + (choiceSelections.includes(stat) ? (selectedRace?.choiceBonus || 1) : 0) > 0" 
+                        v-if="getRacialBonusForStat(stat) > 0" 
                         class="flex flex-col items-center justify-center px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg"
                       >
                         <span class="text-[7px] font-black text-emerald-600 dark:text-emerald-400 uppercase leading-none">Racial</span>
                         <span class="text-[10px] font-black text-emerald-600">
-                          +{{ (selectedRace?.bonuses?.[stat] || 0) + (choiceSelections.includes(stat) ? (selectedRace?.choiceBonus || 1) : 0) }}
+                          +{{ getRacialBonusForStat(stat) }}
                         </span>
                       </div>
                     </div>
@@ -858,12 +867,12 @@ onUnmounted(() => {
                 
                 <!-- Explicit Racial Bonus -->
                 <div 
-                  v-if="(selectedRace?.bonuses[stat] || 0) + (choiceSelections.includes(stat) ? (selectedRace?.choiceBonus || 1) : 0) > 0"
+                  v-if="getRacialBonusForStat(stat) > 0"
                   class="flex flex-col items-end"
                 >
                   <span class="text-[8px] font-black text-emerald-500 uppercase tracking-widest leading-none">Racial</span>
                   <span class="text-lg font-black text-emerald-500">
-                    +{{ (selectedRace?.bonuses[stat] || 0) + (choiceSelections.includes(stat) ? (selectedRace?.choiceBonus || 1) : 0) }}
+                    +{{ getRacialBonusForStat(stat) }}
                   </span>
                 </div>
               </div>

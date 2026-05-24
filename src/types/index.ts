@@ -77,6 +77,7 @@ export interface Race {
   source?: string;
   choiceCount?: number;
   choiceBonus?: number;
+  choiceBonuses?: number[];
   choiceExclude?: StatType[];
   isActive?: boolean;
 }

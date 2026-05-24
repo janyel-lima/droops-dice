@@ -114,3 +114,121 @@ export function getContextualFeedback(stats: number[], raceName: string): string
   
   return feedback;
 }
+
+export interface RacialBonusBreakdown {
+  fixed: number;
+  chosen: number;
+  total: number;
+  base: number;
+}
+
+export function getRacialBonusesBreakdown(
+  char: { attributes: CharacterAttributes | null; rolls: { raw: number[] } | null },
+  race: Race
+): Record<StatType, RacialBonusBreakdown> {
+  const stats: StatType[] = ['STR', 'DEX', 'CON', 'INT', 'WIS', 'CHA'];
+  const breakdown: Record<StatType, RacialBonusBreakdown> = {} as any;
+  
+  // Default values when attributes or rolls are missing
+  stats.forEach(s => {
+    breakdown[s] = {
+      fixed: race.bonuses[s] || 0,
+      chosen: 0,
+      total: race.bonuses[s] || 0,
+      base: (char.attributes ? char.attributes[s] : 0) - (race.bonuses[s] || 0)
+    };
+  });
+
+  if (!char.attributes || !char.rolls) {
+    return breakdown;
+  }
+
+  const rawRolls = [...char.rolls.raw].sort((a, b) => a - b);
+  const fixedBonuses = race.bonuses || {};
+  const choiceCount = race.choiceCount || 0;
+  const choiceBonus = race.choiceBonus || 1;
+  const choiceExclude = race.choiceExclude || [];
+
+  if (choiceCount === 0) {
+    // No choice bonuses, just fixed bonuses
+    stats.forEach(s => {
+      const finalVal = char.attributes![s] || 0;
+      const fixed = fixedBonuses[s] || 0;
+      breakdown[s] = {
+        fixed,
+        chosen: 0,
+        total: fixed,
+        base: finalVal - fixed
+      };
+    });
+    return breakdown;
+  }
+
+  // Find all possible combinations of choice-based bonuses
+  const validStatsForChoice = stats.filter(s => !choiceExclude.includes(s));
+  
+  // Helper to get combinations
+  function getCombinations<T>(array: T[], size: number): T[][] {
+    if (size === 0) return [[]];
+    if (array.length === 0) return [];
+    const head = array[0];
+    const tail = array.slice(1);
+    const withHead = getCombinations(tail, size - 1).map(c => [head, ...c]);
+    const withoutHead = getCombinations(tail, size);
+    return [...withHead, ...withoutHead];
+  }
+
+  const combos = getCombinations(validStatsForChoice, choiceCount);
+  let bestCombo: StatType[] | null = null;
+
+  for (const combo of combos) {
+    // For this combination, compute the base values
+    const currentBaseVals: number[] = [];
+    let isPossible = true;
+    
+    for (const s of stats) {
+      const finalVal = char.attributes![s] || 0;
+      const fixed = fixedBonuses[s] || 0;
+      const comboIndex = combo.indexOf(s);
+      const chosen = comboIndex > -1 
+        ? (race.choiceBonuses && race.choiceBonuses[comboIndex] !== undefined ? race.choiceBonuses[comboIndex] : choiceBonus)
+        : 0;
+      const base = finalVal - fixed - chosen;
+      
+      if (base < 0) {
+        isPossible = false;
+        break;
+      }
+      currentBaseVals.push(base);
+    }
+
+    if (!isPossible) continue;
+
+    // Sort to compare with sorted raw rolls
+    const sortedBase = [...currentBaseVals].sort((a, b) => a - b);
+    const matches = sortedBase.length === rawRolls.length && sortedBase.every((val, idx) => val === rawRolls[idx]);
+    
+    if (matches) {
+      bestCombo = combo;
+      break; // Found a matching combo!
+    }
+  }
+
+  const chosenStats = bestCombo || [];
+  stats.forEach(s => {
+    const finalVal = char.attributes![s] || 0;
+    const fixed = fixedBonuses[s] || 0;
+    const comboIndex = chosenStats.indexOf(s);
+    const chosen = comboIndex > -1 
+      ? (race.choiceBonuses && race.choiceBonuses[comboIndex] !== undefined ? race.choiceBonuses[comboIndex] : choiceBonus)
+      : 0;
+    breakdown[s] = {
+      fixed,
+      chosen,
+      total: fixed + chosen,
+      base: finalVal - fixed - chosen
+    };
+  });
+
+  return breakdown;
+}

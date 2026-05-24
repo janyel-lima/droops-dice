@@ -16,7 +16,7 @@ import {
 import { useAuthStore } from '@/stores/auth';
 import { handleFirestoreError, OperationType } from '@/firebase/firestoreUtils';
 import { CharacterStatus, type Character, type Race, type StatType } from '@/types';
-import { BASE_RACES, STAT_LABELS, calculateModifier, getModifierString } from '@/utils/dndRules';
+import { BASE_RACES, STAT_LABELS, calculateModifier, getModifierString, getRacialBonusesBreakdown } from '@/utils/dndRules';
 import { 
   ShieldAlert, 
   Key, 
@@ -349,10 +349,53 @@ watch(raceSearch, () => {
   raceCurrentPage.value = 1;
 });
 
-const editRace = (race: Race) => {
-  editingRace.value = { ...race };
+const createNewRace = () => {
+  editingRace.value = { 
+    id: 'new-' + Date.now(), 
+    name: '', 
+    bonuses: {}, 
+    source: 'Homebrew', 
+    choiceCount: 0, 
+    choiceBonus: 1, 
+    choiceBonuses: [],
+    choiceExclude: [],
+    isActive: true
+  };
   showRaceModal.value = true;
 };
+
+const editRace = (race: Race) => {
+  const cloned = { ...race };
+  if (cloned.isActive === undefined) {
+    cloned.isActive = true;
+  }
+  if (!cloned.choiceBonuses) {
+    cloned.choiceBonuses = [];
+  }
+  if (cloned.choiceCount && cloned.choiceBonuses.length === 0) {
+    cloned.choiceBonuses = Array(cloned.choiceCount).fill(cloned.choiceBonus || 1);
+  }
+  editingRace.value = cloned;
+  showRaceModal.value = true;
+};
+
+watch(() => editingRace.value?.choiceCount, (newCount) => {
+  if (!editingRace.value) return;
+  const count = Number(newCount) || 0;
+  if (count <= 0) {
+    editingRace.value.choiceBonuses = [];
+    return;
+  }
+  if (!editingRace.value.choiceBonuses) {
+    editingRace.value.choiceBonuses = [];
+  }
+  while (editingRace.value.choiceBonuses.length < count) {
+    editingRace.value.choiceBonuses.push(editingRace.value.choiceBonus || 1);
+  }
+  if (editingRace.value.choiceBonuses.length > count) {
+    editingRace.value.choiceBonuses = editingRace.value.choiceBonuses.slice(0, count);
+  }
+});
 
 const saveRace = async () => {
   if (!editingRace.value) return;
@@ -367,6 +410,10 @@ const saveRace = async () => {
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, `races/${editingRace.value.id}`);
   }
+};
+
+const getCharRace = (char: Character) => {
+  return races.value.find(r => r.id === char.raceId) || BASE_RACES.find(r => r.id === char.raceId) || BASE_RACES[0];
 };
 </script>
 
@@ -773,10 +820,39 @@ const saveRace = async () => {
                             <Shapes class="w-4 h-4" /> Distribuição de Poder
                           </h4>
                           <div v-if="char.attributes" class="grid grid-cols-3 gap-4">
-                            <div v-for="(v, k) in char.attributes" :key="k" class="p-4 bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-2xl shadow-sm">
-                              <div class="text-[8px] font-black text-neutral-400 uppercase mb-1">{{ STAT_LABELS[k as StatType] }}</div>
-                              <div class="text-3xl font-rpg font-black text-neutral-900 dark:text-white">{{ v }}</div>
-                              <div class="text-[10px] font-bold text-arcane-500 mt-1">{{ getModifierString(calculateModifier(v)) }} Modificador</div>
+                            <div v-for="(v, k) in char.attributes" :key="k" class="p-4 bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-2xl shadow-sm relative overflow-hidden flex flex-col justify-between">
+                              <div>
+                                <div class="text-[8px] font-black text-neutral-400 uppercase mb-1 flex items-center justify-between">
+                                  <span>{{ STAT_LABELS[k as StatType] }}</span>
+                                  <span class="text-[7px] font-mono text-neutral-300 dark:text-neutral-700 tracking-tight">{{ k }}</span>
+                                </div>
+                                <div class="flex items-baseline gap-2.5">
+                                  <div class="text-3xl font-rpg font-black text-neutral-900 dark:text-white">{{ v }}</div>
+                                  <template v-if="(() => {
+                                    const rBreak = getRacialBonusesBreakdown(char, getCharRace(char))[k as StatType];
+                                    return rBreak && rBreak.total > 0;
+                                  })()">
+                                    <span class="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 rounded border border-emerald-500/20 text-[8px] font-black uppercase">
+                                      +{{ getRacialBonusesBreakdown(char, getCharRace(char))[k as StatType].total }} R
+                                    </span>
+                                  </template>
+                                </div>
+                              </div>
+                              <div class="mt-2 pt-2 border-t border-neutral-50 dark:border-neutral-900/40 text-left">
+                                <div class="text-[10px] font-bold text-arcane-500">{{ getModifierString(calculateModifier(v)) }} Modificador</div>
+                                <div v-if="(() => {
+                                  const rBreak = getRacialBonusesBreakdown(char, getCharRace(char))[k as StatType];
+                                  return rBreak && rBreak.total > 0;
+                                })()" class="text-[8px] font-black text-neutral-400 uppercase tracking-wider mt-1 flex flex-wrap items-center gap-1.5 leading-none">
+                                  <span class="opacity-60">Base: {{ getRacialBonusesBreakdown(char, getCharRace(char))[k as StatType].base }}</span>
+                                  <span class="opacity-30">•</span>
+                                  <span class="text-emerald-500/90 font-bold">
+                                    {{ getRacialBonusesBreakdown(char, getCharRace(char))[k as StatType].fixed > 0 ? '+' + getRacialBonusesBreakdown(char, getCharRace(char))[k as StatType].fixed + ' Fixo' : '' }}
+                                    {{ getRacialBonusesBreakdown(char, getCharRace(char))[k as StatType].fixed > 0 && getRacialBonusesBreakdown(char, getCharRace(char))[k as StatType].chosen > 0 ? ' & ' : '' }}
+                                    {{ getRacialBonusesBreakdown(char, getCharRace(char))[k as StatType].chosen > 0 ? '+' + getRacialBonusesBreakdown(char, getCharRace(char))[k as StatType].chosen + ' Escolha' : '' }}
+                                  </span>
+                                </div>
+                              </div>
                             </div>
                           </div>
                           <div v-else class="h-full min-h-[160px] border-2 border-dashed border-neutral-100 dark:border-neutral-800/50 rounded-[2rem] flex items-center justify-center">
@@ -859,19 +935,7 @@ const saveRace = async () => {
                 />
               </div>
               <button 
-                @click="() => {
-                  editingRace = { 
-                    id: 'new-' + Date.now(), 
-                    name: '', 
-                    bonuses: {}, 
-                    source: 'Homebrew', 
-                    choiceCount: 0, 
-                    choiceBonus: 1, 
-                    choiceExclude: [],
-                    isActive: true
-                  };
-                  showRaceModal = true;
-                }"
+                @click="createNewRace"
                 class="px-5 py-3 bg-arcane-600 hover:bg-arcane-500 text-white text-xs font-black rounded-2xl transition-all flex items-center gap-2 shadow-lg shadow-arcane-500/10"
               >
                 <Plus class="w-4 h-4" />
@@ -1000,6 +1064,24 @@ const saveRace = async () => {
                 <input v-model="editingRace.source" placeholder="Ex: PHB, Tasha, Homebrew" class="w-full px-5 py-4 bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-2xl outline-none focus:ring-2 focus:ring-arcane-500/20 font-bold" />
               </div>
 
+              <!-- Race Activation Toggle -->
+              <div class="space-y-2">
+                <label class="text-[10px] font-black text-neutral-400 uppercase tracking-widest block">Status da Raça</label>
+                <button 
+                  @click="editingRace.isActive = !editingRace.isActive"
+                  type="button"
+                  :class="[
+                    'w-full px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 border-2',
+                    editingRace.isActive 
+                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' 
+                      : 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20'
+                  ]"
+                >
+                  <span class="w-2.5 h-2.5 rounded-full animate-pulse" :class="editingRace.isActive ? 'bg-emerald-500' : 'bg-red-500'"></span>
+                  {{ editingRace.isActive ? 'Ancestralidade Ativa' : 'Ancestralidade Desativada (Oculta)' }}
+                </button>
+              </div>
+
               <div class="space-y-4 pt-4 border-t border-neutral-100 dark:border-neutral-800">
                 <h4 class="text-[11px] font-black text-arcane-500 uppercase tracking-[0.2em] italic">BÔNUS FIXOS</h4>
                 <div class="grid grid-cols-3 gap-3">
@@ -1033,7 +1115,31 @@ const saveRace = async () => {
                   <p class="text-[9px] text-neutral-400 italic">Quantos atributos diferentes o jogador pode selecionar para receber bônus.</p>
                 </div>
 
-                <div class="space-y-2">
+                <!-- Dynamic inputs for individual choice bonuses based on choiceCount -->
+                <div v-if="editingRace.choiceCount && editingRace.choiceCount > 0" class="space-y-3 pt-4 border-t border-neutral-200 dark:border-neutral-800">
+                  <label class="text-[10px] font-black text-neutral-450 dark:text-neutral-550 uppercase tracking-widest block">Valores dos Bônus de Escolha</label>
+                  <div class="grid grid-cols-2 gap-3">
+                    <div v-for="i in editingRace.choiceCount" :key="i" class="space-y-1">
+                      <label class="text-[8px] font-black text-neutral-400 uppercase">Escolha {{ i }} (+)</label>
+                      <input 
+                        type="number" 
+                        v-model.number="editingRace.choiceBonuses[i - 1]" 
+                        class="w-full px-4 py-3 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl font-bold text-center outline-none focus:ring-2 focus:ring-arcane-500/20" 
+                        placeholder="Ex: 1"
+                        @input="() => {
+                          if (editingRace.choiceBonuses[i - 1] === undefined || isNaN(editingRace.choiceBonuses[i - 1] as number)) {
+                            editingRace.choiceBonuses[i - 1] = 1;
+                          }
+                          editingRace.choiceBonus = editingRace.choiceBonuses[0] || 1;
+                        }"
+                      />
+                    </div>
+                  </div>
+                  <p class="text-[8px] text-neutral-400 uppercase tracking-tight">Defina os valores específicos que os atributos selecionados irão receber.</p>
+                </div>
+
+                <!-- Fallback single bonus input when choiceCount is active but no individual choice array is set -->
+                <div v-else class="space-y-2">
                   <label class="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Valor do Bônus de Escolha</label>
                   <input 
                     type="number" 
