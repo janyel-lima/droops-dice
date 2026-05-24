@@ -42,7 +42,7 @@ import {
   ShieldCheck
 } from 'lucide-vue-next';
 import { db } from '@/firebase/config';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, doc, updateDoc } from 'firebase/firestore';
 import type { Race } from '@/types';
 
 const route = useRoute();
@@ -77,6 +77,77 @@ const selectedRace = computed(() => races.value.find(r => r.id === raceId.value)
 watch(raceId, () => {
   choiceSelections.value = [];
 });
+
+const showChangeRaceModal = ref(false);
+const showRerollConfirmModal = ref(false);
+const showRerollSuccessBanner = ref(false);
+const lastRerolledValue = ref(0);
+const newRerolledValue = ref(0);
+
+const changeRace = async (newRaceId: string) => {
+  raceId.value = newRaceId;
+  choiceSelections.value = [];
+  
+  if (charStore.currentCharacter) {
+    try {
+      await updateDoc(doc(db, 'characters', charStore.currentCharacter.id), {
+        raceId: newRaceId,
+        updatedAt: Date.now()
+      });
+    } catch (err) {
+      console.error("Failed to persist race change:", err);
+    }
+  }
+};
+
+const handleRerollWorstOnDistribution = async () => {
+  const char = charStore.currentCharacter;
+  if (!char || !char.rolls || char.rolls.rerollUsed) return;
+  
+  const rawRolls = [...char.rolls.raw];
+  const minVal = Math.min(...rawRolls);
+  const index = rawRolls.indexOf(minVal);
+
+  let newRoll = roll4d6DropLowest();
+  const currentSumWithoutThisOne = rawRolls.reduce((acc, val, i) => i === index ? acc : acc + val, 0);
+
+  if (boonActive.value && currentSumWithoutThisOne < 76) {
+    while (newRoll.total < 10) {
+      newRoll = roll4d6DropLowest();
+    }
+  }
+
+  rawRolls[index] = newRoll.total;
+  
+  let details = char.rolls.details ? [...char.rolls.details] : [];
+  if (details.length > 0) {
+    details[index] = newRoll;
+  }
+
+  distribution.value = {};
+  choiceSelections.value = [];
+
+  try {
+    await updateDoc(doc(db, 'characters', char.id), {
+      rolls: {
+        raw: rawRolls,
+        details: details.length > 0 ? details : null,
+        rerollUsed: true,
+        timestamp: Date.now()
+      },
+      updatedAt: Date.now()
+    });
+    
+    lastRerolledValue.value = minVal;
+    newRerolledValue.value = newRoll.total;
+    showRerollSuccessBanner.value = true;
+    setTimeout(() => {
+      showRerollSuccessBanner.value = false;
+    }, 8000);
+  } catch (err) {
+    console.error("Failed to perform reroll during distribution:", err);
+  }
+};
 
 const filteredRaces = computed(() => {
   const availableRaces = races.value.length > 0 ? races.value : BASE_RACES;
@@ -702,6 +773,59 @@ onUnmounted(() => {
           <p class="text-neutral-500 dark:text-neutral-400 text-lg font-medium italic">Distribua seus valores nos atributos de sua preferência.</p>
         </div>
 
+        <!-- Action Board (Change Race & Reroll worst) -->
+        <div class="max-w-xl mx-auto p-6 bg-neutral-50 dark:bg-neutral-905 border border-neutral-100 dark:border-neutral-800 rounded-3xl flex flex-col sm:flex-row gap-4 justify-between items-center shadow-inner">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-2xl bg-arcane-500/10 border border-arcane-500/20 flex items-center justify-center">
+              <Component class="w-5 h-5 text-arcane-600 dark:text-arcane-400" />
+            </div>
+            <div class="text-left">
+              <span class="text-[8px] font-black text-neutral-400 uppercase tracking-widest block leading-none mb-1">Ancestralidade Atual</span>
+              <span class="text-md font-rpg font-black text-neutral-800 dark:text-white uppercase tracking-tight">{{ selectedRace?.name || 'Carregando...' }}</span>
+            </div>
+          </div>
+          
+          <div class="flex flex-wrap gap-2 w-full sm:w-auto justify-end">
+            <!-- Reroll Worst (if available) -->
+            <button 
+              v-if="charStore.currentCharacter?.rolls && !charStore.currentCharacter.rolls.rerollUsed"
+              @click="showRerollConfirmModal = true"
+              type="button"
+              class="px-4 py-2.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-2 active:scale-95"
+            >
+              <RefreshCw class="w-3.5 h-3.5" />
+              Reroll do Pior
+            </button>
+            <span v-else class="px-3 py-1 bg-neutral-200/50 dark:bg-neutral-900 text-neutral-400 rounded-lg text-[8px] font-black uppercase tracking-wider flex items-center">
+              Reroll Utilizado
+            </span>
+
+            <!-- Change Race Button -->
+            <button 
+              @click="showChangeRaceModal = true"
+              type="button"
+              class="px-4 py-2.5 bg-arcane-600 hover:bg-arcane-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-2 shadow-sm shadow-arcane-600/10 active:scale-95"
+            >
+              <ArrowRightLeft class="w-3.5 h-3.5" />
+              Alterar Ancestralidade
+            </button>
+          </div>
+        </div>
+
+        <!-- Reroll Success Notification Banner -->
+        <div v-if="showRerollSuccessBanner" class="max-w-xl mx-auto p-5 bg-emerald-500/10 border border-emerald-500/20 rounded-3xl flex items-center gap-4 animate-in slide-in-from-top-2">
+          <div class="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+            <CheckCircle2 class="w-5 h-5 animate-pulse" />
+          </div>
+          <div class="text-left flex-1">
+            <h5 class="text-xs font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wide">REROLAGEM EFETUADA COM SUCESSO!</h5>
+            <p class="text-[10px] text-emerald-500/90 leading-tight mt-0.5">
+              O pior glifo com valor <strong>{{ lastRerolledValue }}</strong> dissolveu-se e reformulou-se no valor <strong>{{ newRerolledValue }}</strong>!
+            </p>
+          </div>
+          <button @click="showRerollSuccessBanner = false" class="text-[10px] font-black text-emerald-500 uppercase tracking-tighter hover:underline">Fechar</button>
+        </div>
+
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-10">
           <!-- Available Numbers -->
           <div class="lg:col-span-1 space-y-6">
@@ -958,6 +1082,136 @@ onUnmounted(() => {
             <h5 class="text-[10px] font-black uppercase tracking-widest text-neutral-900 dark:text-white leading-tight">Boon of Outer Realms</h5>
           </div>
           <p class="text-[9px] text-neutral-400 leading-relaxed uppercase font-bold italic">As leis da probabilidade curvam-se perante sua vontade. Atributos inferiores a 10 são purgados pelo vazio.</p>
+        </div>
+      </div>
+
+      <!-- Modal: Confirm Reroll Worst during Distribution -->
+      <div v-if="showRerollConfirmModal" class="fixed inset-0 z-[60] flex items-center justify-center bg-white/80 dark:bg-black/90 backdrop-blur-md p-6">
+        <div class="bg-white dark:bg-neutral-950 border-2 border-neutral-100 dark:border-neutral-800 rounded-[2.5rem] max-w-sm w-full p-8 space-y-6 shadow-2xl relative overflow-hidden transition-all duration-300">
+          <div class="text-center space-y-4">
+            <div class="w-16 h-16 bg-amber-500/15 text-amber-550 border border-amber-500/25 rounded-3xl flex items-center justify-center mx-auto animate-pulse">
+              <RefreshCw class="w-8 h-8" />
+            </div>
+            <h3 class="text-3xl font-display font-black text-neutral-900 dark:text-white uppercase tracking-tighter">RITUAL DE REROLL</h3>
+            <p class="text-neutral-500 dark:text-neutral-400 text-sm leading-relaxed">
+              Você tem direito a <strong>1 reroll</strong> do seu pior atributo (Atualmente o valor mínimo é <strong>{{ Math.min(...(charStore.currentCharacter?.rolls?.raw || [0])) }}</strong>).
+            </p>
+            <div class="p-4 bg-amber-500/5 border border-amber-500/10 rounded-2xl text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wide leading-relaxed">
+              ATENÇÃO: Este processo limpará sua distribuição atual de atributos para que você os reorganize com o novo valor!
+            </div>
+          </div>
+
+          <div class="flex gap-4">
+            <button 
+              @click="showRerollConfirmModal = false" 
+              class="flex-1 py-4 bg-neutral-100 dark:bg-neutral-900 text-neutral-500 dark:text-neutral-400 text-xs font-black uppercase tracking-widest rounded-2xl hover:text-neutral-950 dark:hover:text-white transition-colors"
+            >
+              Cancelar
+            </button>
+            <button 
+              @click="() => { showRerollConfirmModal = false; handleRerollWorstOnDistribution(); }" 
+              class="flex-1 py-4 bg-amber-500 hover:bg-amber-650 text-white text-xs font-black uppercase tracking-widest rounded-2xl transition-all shadow-lg shadow-amber-500/20"
+            >
+              Invocar Reroll
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal: Change Race during Distribution -->
+      <div v-if="showChangeRaceModal" class="fixed inset-0 z-[60] flex items-center justify-center bg-white/80 dark:bg-black/90 backdrop-blur-md p-6">
+        <div class="bg-white dark:bg-neutral-950 border-2 border-neutral-100 dark:border-neutral-800 rounded-[2.5rem] max-w-2xl w-full p-8 space-y-6 shadow-2xl relative overflow-hidden flex flex-col max-h-[90vh]">
+          
+          <div class="flex items-center justify-between pb-4 border-b border-neutral-100 dark:border-neutral-900 shrink-0">
+            <div>
+              <h3 class="text-2xl font-rpg font-black text-neutral-900 dark:text-white uppercase tracking-tighter italic">ALTERAR ANCESTRALIDADE</h3>
+              <p class="text-[10px] font-bold text-neutral-400 uppercase tracking-widest">Os deuses do destino permitem remodelar sua linhagem.</p>
+            </div>
+            <button 
+              @click="showChangeRaceModal = false" 
+              class="px-4 py-2 text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-colors bg-neutral-100 dark:bg-neutral-800 rounded-xl text-xs font-black uppercase tracking-wider"
+            >
+              Fechar
+            </button>
+          </div>
+
+          <!-- Search or Filters -->
+          <div class="flex items-center justify-between gap-4 shrink-0">
+            <label class="text-[10px] font-black text-neutral-400 uppercase tracking-wider">Filtro de Linhagens</label>
+            <div class="relative w-64">
+              <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400" />
+              <input 
+                v-model="raceSearch"
+                placeholder="Pesquisar raças..."
+                class="w-full pl-9 pr-3 py-2 bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-xl text-xs font-bold focus:ring-2 focus:ring-arcane-500/10 outline-none transition-all"
+              />
+            </div>
+          </div>
+
+          <!-- Races Grid / List Scroll Area -->
+          <div class="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-6">
+            <div v-for="(racesGrp, groupName) in groupedRaces" :key="groupName" class="space-y-3">
+              <h4 v-if="racesGrp.length > 0" class="text-[8px] font-black text-neutral-300 dark:text-neutral-700 uppercase tracking-[0.4em] border-b border-neutral-100 dark:border-neutral-900 pb-1">
+                {{ groupName }}
+              </h4>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  v-for="race in racesGrp"
+                  :key="race.id"
+                  @click="changeRace(race.id)"
+                  :class="[
+                    'p-4 rounded-2xl border-2 text-left transition-all relative overflow-hidden group',
+                    raceId === race.id 
+                      ? 'border-arcane-500 bg-arcane-500/5 ring-4 ring-arcane-500/5' 
+                      : 'border-neutral-100 dark:border-neutral-800 bg-white dark:bg-neutral-900 hover:border-neutral-200 dark:hover:border-neutral-700'
+                  ]"
+                >
+                  <div class="flex flex-col h-full justify-between">
+                    <div>
+                      <div class="font-black text-sm uppercase tracking-tighter transition-colors" :class="raceId === race.id ? 'text-arcane-600 dark:text-arcane-400' : 'text-neutral-500 dark:text-neutral-400'">{{ race.name }}</div>
+                      <div class="text-[8px] font-black text-neutral-400 dark:text-neutral-600 uppercase tracking-widest mt-0.5">{{ race.source }}</div>
+                    </div>
+                    <div class="mt-3 flex flex-wrap gap-1">
+                      <template v-if="Object.keys(race.bonuses).length > 0">
+                        <span v-for="(val, stat) in race.bonuses" :key="stat" class="px-1.5 py-0.5 bg-neutral-50 dark:bg-neutral-950 rounded border border-neutral-100 dark:border-neutral-900 text-[7px] font-black">
+                           +{{ val }} {{ stat }}
+                        </span>
+                      </template>
+                      <span v-if="race.choiceCount" class="px-1.5 py-0.5 bg-arcane-500/10 text-arcane-500 rounded border border-arcane-500/20 text-[7px] font-black uppercase">+{{ race.choiceCount }} ESCOLHAS</span>
+                    </div>
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Pagination -->
+          <div v-if="raceTotalPages > 1" class="flex items-center justify-center gap-4 pt-4 border-t border-neutral-100 dark:border-neutral-900 shrink-0">
+            <button 
+              @click="raceCurrentPage--" 
+              :disabled="raceCurrentPage === 1"
+              class="p-2 border border-neutral-100 dark:border-neutral-800 rounded-lg text-neutral-400 disabled:opacity-30 hover:bg-neutral-50 dark:hover:bg-neutral-900 transition-all"
+            >
+              <ChevronLeft class="w-4 h-4" />
+            </button>
+            <div class="flex gap-1">
+              <span v-for="p in raceTotalPages" :key="p" 
+                @click="raceCurrentPage = p"
+                :class="[
+                  'w-2 h-2 rounded-full transition-all cursor-pointer',
+                  raceCurrentPage === p ? 'bg-arcane-500 scale-125' : 'bg-neutral-200 dark:bg-neutral-800'
+                ]"
+              ></span>
+            </div>
+            <button 
+              @click="raceCurrentPage++" 
+              :disabled="raceCurrentPage === raceTotalPages"
+              class="p-2 border border-neutral-100 dark:border-neutral-800 rounded-lg text-neutral-400 disabled:opacity-30 hover:bg-neutral-50 dark:hover:bg-neutral-900 transition-all"
+            >
+              <ChevronLeft class="w-4 h-4 rotate-180" />
+            </button>
+          </div>
+
         </div>
       </div>
     </main>
