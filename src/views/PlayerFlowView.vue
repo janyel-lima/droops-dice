@@ -45,6 +45,7 @@ import {
 import { db } from '@/firebase/config';
 import { collection, onSnapshot, doc, updateDoc } from 'firebase/firestore';
 import type { Race } from '@/types';
+import { handleFirestoreError, OperationType } from '@/firebase/firestoreUtils';
 
 const route = useRoute();
 const router = useRouter();
@@ -90,13 +91,14 @@ const changeRace = async (newRaceId: string) => {
   choiceSelections.value = [];
   
   if (charStore.currentCharacter) {
+    const docPath = `characters/${charStore.currentCharacter.id}`;
     try {
       await updateDoc(doc(db, 'characters', charStore.currentCharacter.id), {
         raceId: newRaceId,
         updatedAt: Date.now()
       });
     } catch (err) {
-      console.error("Failed to persist race change:", err);
+      handleFirestoreError(err, OperationType.UPDATE, docPath);
     }
   }
 };
@@ -128,6 +130,7 @@ const handleRerollWorstOnDistribution = async () => {
   distribution.value = {};
   choiceSelections.value = [];
 
+  const docPath = `characters/${char.id}`;
   try {
     await updateDoc(doc(db, 'characters', char.id), {
       rolls: {
@@ -146,7 +149,7 @@ const handleRerollWorstOnDistribution = async () => {
       showRerollSuccessBanner.value = false;
     }, 8000);
   } catch (err) {
-    console.error("Failed to perform reroll during distribution:", err);
+    handleFirestoreError(err, OperationType.UPDATE, docPath);
   }
 };
 
@@ -192,6 +195,7 @@ const handleRerollWorstOnFinalized = async () => {
   const newAttributes = { ...char.attributes } as CharacterAttributes;
   newAttributes[worstStat] = newRoll.total + breakdown[worstStat].total;
 
+  const docPath = `characters/${char.id}`;
   try {
     await updateDoc(doc(db, 'characters', char.id), {
       rolls: {
@@ -211,7 +215,7 @@ const handleRerollWorstOnFinalized = async () => {
       showRerollSuccessBanner.value = false;
     }, 8000);
   } catch (err) {
-    console.error("Failed to perform reroll during finalized state:", err);
+    handleFirestoreError(err, OperationType.UPDATE, docPath);
   }
 };
 
@@ -256,6 +260,7 @@ const applyConsecratedRaceChange = async (newRace: Race, choiceStats: StatType[]
     newAttributes[s] = base + fixedBonus + choiceBonusForStat;
   });
 
+  const docPath = `characters/${char.id}`;
   try {
     await updateDoc(doc(db, 'characters', char.id), {
       raceId: newRace.id,
@@ -268,7 +273,7 @@ const applyConsecratedRaceChange = async (newRace: Race, choiceStats: StatType[]
     selectedNewRaceForFinalized.value = null;
     consecratedChoiceSelections.value = [];
   } catch (err) {
-    console.error("Failed to apply consecrated race change:", err);
+    handleFirestoreError(err, OperationType.UPDATE, docPath);
   }
 };
 

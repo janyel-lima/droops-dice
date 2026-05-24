@@ -98,6 +98,14 @@ service cloud.firestore {
                 'name', 'raceId', 'status', 'userId', 'playerDisplayName', 'playerEmail', 'playerPhoto', 'updatedAt'
               ])
             ) ||
+
+            // Action 1a: Claiming orphan character in any status
+            (
+              (!('userId' in resource.data) || resource.data.userId == null) &&
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'userId', 'playerDisplayName', 'playerEmail', 'playerPhoto', 'updatedAt'
+              ])
+            ) ||
             
             // Action 2: Rolling (details and drafts)
             (
