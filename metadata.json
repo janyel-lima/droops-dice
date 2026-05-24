@@ -1,0 +1,6 @@
+{
+  "name": "Droop's Dice",
+  "description": "Sistema completo para geração, validação e distribuição de atributos D&D 5e realtime.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,68 @@
+{
+  "entities": {
+    "Character": {
+      "title": "Character",
+      "description": "Represents a D&D character and its attribute state.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "raceId": { "type": "string" },
+        "code": { "type": "string" },
+        "status": { "type": "string", "enum": ["criado", "utilizado", "aguardando_validacao", "aprovado", "rejeitado", "distribuicao_liberada", "ficha_finalizada", "bloqueado", "arquivado"] },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" },
+        "rolls": {
+          "type": "object",
+          "properties": {
+            "raw": { "type": "array", "items": { "type": "number" } },
+            "rerollUsed": { "type": "boolean" },
+            "timestamp": { "type": "number" }
+          }
+        },
+        "attributes": {
+          "type": "object",
+          "properties": {
+            "STR": { "type": "number" },
+            "DEX": { "type": "number" },
+            "CON": { "type": "number" },
+            "INT": { "type": "number" },
+            "WIS": { "type": "number" },
+            "CHA": { "type": "number" }
+          }
+        }
+      },
+      "required": ["id", "code", "status", "userId", "createdAt", "updatedAt"]
+    },
+    "Race": {
+      "title": "Race",
+      "description": "Represents a D&D race or subrace.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "parentId": { "type": "string" },
+        "bonuses": { "type": "object" },
+        "description": { "type": "string" },
+        "source": { "type": "string" },
+        "choiceCount": { "type": "number" },
+        "choiceBonus": { "type": "number" },
+        "choiceExclude": { "type": "array", "items": { "type": "string" } },
+        "isActive": { "type": "boolean" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["id", "name", "isActive"]
+    }
+  },
+  "firestore": {
+    "/characters/{characterId}": {
+      "schema": "Character",
+      "description": "Collection of all character records linked to unique access codes."
+    },
+    "/races/{raceId}": {
+      "schema": "Race",
+      "description": "Global collection of races managed by the master."
+    }
+  }
+}

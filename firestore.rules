@@ -1,0 +1,135 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ---------------------------------------------------------
+    // Global Safety Net
+    // ---------------------------------------------------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ---------------------------------------------------------
+    // Helper Functions
+    // ---------------------------------------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Checking if user exists in admins collection or master's email
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        request.auth.token.get('email', '').matches('.*@example\\.com$') ||
+        request.auth.token.get('email', '') == 'kibedasppk@gmail.com'
+      );
+    }
+
+    // ---------------------------------------------------------
+    // Character Validation Helper
+    // ---------------------------------------------------------
+    function isValidCharacter(data) {
+      return data.id is string && data.id.size() <= 64
+          && data.code is string && data.code.size() <= 32
+          && data.status in ['criado', 'utilizado', 'aguardando_validacao', 'aprovado', 'rejeitado', 'distribuicao_liberada', 'ficha_finalizada', 'bloqueado', 'arquivado']
+          && (!('userId' in data) || data.userId == null || data.userId is string)
+          && (!('masterId' in data) || data.masterId == null || data.masterId is string)
+          && (!('playerDisplayName' in data) || data.playerDisplayName == null || data.playerDisplayName is string)
+          && (!('playerEmail' in data) || data.playerEmail == null || data.playerEmail is string)
+          && (!('playerPhoto' in data) || data.playerPhoto == null || data.playerPhoto is string)
+          && data.createdAt is number
+          && data.updatedAt is number
+          && (!('rolls' in data) || data.rolls == null || data.rolls is map)
+          && (!('attributes' in data) || data.attributes == null || data.attributes is map);
+    }
+
+    // ---------------------------------------------------------
+    // Distribution Rules (Races)
+    // ---------------------------------------------------------
+    match /races/{raceId} {
+      allow read: if true; // Publicly readable
+      allow write: if isAdmin(); // Only Master can manage races
+    }
+
+    // ---------------------------------------------------------
+    // Character Collection Rules
+    // ---------------------------------------------------------
+    match /characters/{characterId} {
+      
+      allow get: if true; // Allow anyone to search / check a valid code
+      
+      allow list: if isAdmin() && resource.data.masterId == request.auth.uid;
+
+      allow create: if isSignedIn() 
+        && isValidId(characterId) 
+        && isValidCharacter(request.resource.data)
+        && (
+          (isAdmin() && request.resource.data.masterId == request.auth.uid) ||
+          (!isAdmin() && (request.resource.data.userId == request.auth.uid || !('userId' in request.resource.data) || request.resource.data.userId == null))
+        );
+
+      allow update: if isSignedIn() && (
+        // Master can edit their OWN characters
+        (isAdmin() && resource.data.masterId == request.auth.uid) || 
+        
+        // Player Updates
+        (
+          (
+            // Either the player already owns the character
+            resource.data.userId == request.auth.uid || 
+            // Or the character is unowned (userId is null) and the transaction claims it
+            ((!('userId' in resource.data) || resource.data.userId == null) && request.resource.data.userId == request.auth.uid)
+          ) 
+          && isValidCharacter(request.resource.data) 
+          && (
+            // Action 1: Claiming and Customizing (name, race, status transitions)
+            (
+              (resource.data.status == 'criado' || resource.data.status == 'utilizado') && 
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'name', 'raceId', 'status', 'userId', 'playerDisplayName', 'playerEmail', 'playerPhoto', 'updatedAt'
+              ])
+            ) ||
+            
+            // Action 2: Rolling (details and drafts)
+            (
+              resource.data.status == 'utilizado' && 
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'rolls', 'draftRolls', 'status', 'updatedAt'
+              ])
+            ) ||
+            
+            // Action 3: Attribute Distribution
+            (
+              (resource.data.status == 'aprovado' || resource.data.status == 'distribuicao_liberada') && 
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'attributes', 'status', 'updatedAt'
+              ])
+            )
+          )
+        )
+      );
+
+      allow delete: if isAdmin();
+    }
+
+    // ---------------------------------------------------------
+    // Admin Collection (Bootstrapped)
+    // ---------------------------------------------------------
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (
+        // Allow user to make themselves admin if no admins exist (Bootstrap)
+        adminId == request.auth.uid 
+      );
+    }
+  }
+}
